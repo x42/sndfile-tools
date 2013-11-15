@@ -2,14 +2,15 @@
 # Tell automake to put the object file in the same dir as the source file.
 AUTOMAKE_OPTIONS = subdir-objects
 
-EXTRA_DIST = M4/lrint.m4 M4/lrintf.m4 doc/index.html doc/sweep.png $(man_MANS)
+EXTRA_DIST = M4/lrint.m4 M4/lrintf.m4 doc/index.html doc/sweep.png \
+	tests/valgrind-test.sh Scripts/calc-hilbert-fir.m $(man_MANS)
 
 bin_PROGRAMS = bin/sndfile-generate-chirp bin/sndfile-spectrogram \
 	bin/sndfile-mix-to-mono bin/sndfile-jackplay bin/sndfile-resample \
 	bin/sndfile-waveform
 
 # Test programs or programs not yet working.
-noinst_PROGRAMS = src/kaiser_window_test src/sndfile-pitch-infer
+noinst_PROGRAMS = tests/kaiser_window_test tests/common_tests bin/sndfile-pitch-infer bin/sndfile-beat-detect
 
 INCLUDES = $(SNDFILE_CFLAGS) $(FFTW3_CFLAGS) $(CAIRO_CFLAGS) $(JACK_CFLAGS) \
 			$(SAMPLERATE_CFLAGS)
@@ -22,7 +23,7 @@ man_MANS = man/sndfile-generate-chirp.1 man/sndfile-spectrogram.1 \
 #=========================================================================================
 # The bin targets.
 
-bin_sndfile_generate_chirp_SOURCES = src/generate-chirp.c
+bin_sndfile_generate_chirp_SOURCES = src/generate-chirp.c src/common.c src/common.h
 bin_sndfile_generate_chirp_LDADD = $(SNDFILE_LIBS)
 
 bin_sndfile_spectrogram_SOURCES = src/spectrogram.c src/window.c src/common.c \
@@ -38,16 +39,31 @@ bin_sndfile_waveform_LDADD = $(SNDFILE_LIBS) $(CAIRO_LIBS)
 bin_sndfile_jackplay_SOURCES = src/jackplay.c
 bin_sndfile_jackplay_LDADD = $(SNDFILE_LIBS) $(JACK_LIBS)
 
-bin_sndfile_resample_SOURCES = src/resample.c
+bin_sndfile_resample_SOURCES = src/resample.c src/common.c src/common.h
 bin_sndfile_resample_LDADD = $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
 
-src_sndfile_pitch_infer_SOURCES = src/pitch-infer.c src/window.c src/common.c
-src_sndfile_pitch_infer_LDADD = $(SNDFILE_LIBS) $(FFTW3_LIBS)
+bin_sndfile_beat_detect_SOURCES = src/beat-detect.c src/common.h src/fir_hilbert_coeffs.h
+bin_sndfile_beat_detect_LDADD = $(SNDFILE_LIBS)
+
+bin_sndfile_pitch_infer_SOURCES = src/pitch-infer.c src/window.c src/common.c
+bin_sndfile_pitch_infer_LDADD = $(SNDFILE_LIBS) $(FFTW3_LIBS)
+
+#=========================================================================================
+# Generated header file. This is normally create when autogen.sh is run from a Git
+# checkout. The file is shipped in the source code tarball.
+
+src/fir_hilbert_coeffs.h : Scripts/calc-hilbert-fir.m
+	$(AM_V_GEN)octave -qH $< > $@
 
 #=========================================================================================
 # The make check targets.
 
-src_kaiser_window_test_SOURCES = src/kaiser_window_test.c src/window.h src/window.c
+tests_kaiser_window_test_SOURCES = tests/kaiser_window_test.c src/window.h src/window.c
 
-check : $(noinst_PROGRAMS)
-	src/kaiser_window_test
+tests_common_tests_SOURCES = tests/common_tests.c src/common.c src/common.h
+tests_common_tests_LDADD = $(SNDFILE_LIBS) $(FFTW3_LIBS)
+
+check : $(noinst_PROGRAMS) $(bin_PROGRAMS)
+	@$(top_builddir)/tests/common_tests
+	@$(top_builddir)/tests/kaiser_window_test
+	@$(top_srcdir)/tests/valgrind-test.sh

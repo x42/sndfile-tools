@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2007-2011 Erik de Castro Lopo <erikd@mega-nerd.com>
+** Copyright (C) 2007-2013 Erik de Castro Lopo <erikd@mega-nerd.com>
 **
 ** This program is free software: you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "window.h"
+#include <src/window.h>
 
 #define ARRAY_LEN(x)	((int) ((sizeof (x)) / (sizeof (x [0]))))
 
@@ -28,6 +28,9 @@ main (void)
 {
 	double window [2000] ;
 	int k ;
+
+	printf ("%-37s : ", "kaiser_window_test") ;
+	fflush (stdout) ;
 
 	calc_kaiser_window (window, ARRAY_LEN (window), 1.0) ;
 
@@ -55,7 +58,7 @@ main (void)
 		exit (1) ;
 		} ;
 
-	puts ("----------------------\n        Passed\n----------------------") ;
+	puts ("ok") ;
 
 	return 0 ;
 } /* main */

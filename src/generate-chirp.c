@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2007-2011 Erik de Castro Lopo <erikd@mega-nerd.com>
+** Copyright (C) 2007-2013 Erik de Castro Lopo <erikd@mega-nerd.com>
 **
 ** This program is free software: you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -22,6 +22,8 @@
 #include <errno.h>
 #include <math.h>
 
+#include "common.h"
+
 #include <sndfile.h>
 
 typedef double (*freq_func_t) (double w0, double w1, double total_length) ;
@@ -43,7 +45,7 @@ static void generate_file (const char * filename, const PARAMS * params) ;
 int
 main (int argc, char * argv [])
 {
-	PARAMS params = { 200, -1, -1.0, 0, 0, 0, NULL } ;
+	PARAMS params = { 1.0, -1, -1, 0, 0, 0, NULL } ;
 	const char * filename ;
 	int k ;
 
@@ -53,12 +55,12 @@ main (int argc, char * argv [])
 	for (k = 1 ; k < argc - 3 ; k++)
 	{	if (strcmp (argv [k], "-from") == 0)
 		{	k++ ;
-			params.start_freq = atoi (argv [k]) ;
+			params.start_freq = parse_int_or_die (argv [k], "from frequency") ;
 			continue ;
 			} ;
 		if (strcmp (argv [k], "-to") == 0)
 		{	k++ ;
-			params.end_freq = atoi (argv [k]) ;
+			params.end_freq = parse_int_or_die (argv [k], "to frequency") ;
 			continue ;
 			} ;
 		if (strcmp (argv [k], "-amp") == 0)
@@ -76,8 +78,8 @@ main (int argc, char * argv [])
 		exit (1) ;
 		} ;
 
-	params.samplerate = atoi (argv [argc - 3]) ;
-	params.seconds = atoi (argv [argc - 2]) ;
+	params.samplerate = parse_int_or_die (argv [argc - 3], "sample rate") ;
+	params.seconds = parse_int_or_die (argv [argc - 2], "seconds") ;
 	filename = argv [argc - 1] ;
 
 	check_int_range ("sample rate", params.samplerate, 1000, 200 * 1000) ;
@@ -85,8 +87,10 @@ main (int argc, char * argv [])
 
 	if (params.sweep_func == NULL)
 		params.sweep_func = parse_sweep_type ("-log") ;
-	if (params.end_freq < 0.0)
-		params.end_freq = params.samplerate / 2 ;
+	if (params.start_freq <= 0)
+		params.start_freq = 100 ;
+	if (params.end_freq <= 0)
+		params.end_freq = params.samplerate / 2 - 100 ;
 
 	if (params.end_freq <= params.start_freq)
 	{	printf ("\nError : end frequency %d < start frequency %d.\n\n", params.end_freq, params.start_freq) ;
@@ -128,7 +132,7 @@ usage_exit (const char * argv0)
 
 	puts (
 		"    The output file will contain floating point samples in the range [-1.0, 1.0].\n"
-		"    The ouput file type is determined by the file name extension which should be one\n"
+		"    The output file type is determined by the file name extension which should be one\n"
 		"    of 'wav', 'aifc', 'aif', 'aiff', 'au', 'caf' and 'w64'.\n"
 		) ;
 

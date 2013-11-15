@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2002-2011 Erik de Castro Lopo <erikd@mega-nerd.com>
+** Copyright (C) 2002-2012 Erik de Castro Lopo <erikd@mega-nerd.com>
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -23,6 +23,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
+
+#include "common.h"
 
 #if (HAVE_SNDFILE)
 
@@ -71,7 +73,7 @@ main (int argc, char *argv [])
 			max_speed = SF_TRUE ;
 		else if (strcmp (argv [k], "-to") == 0)
 		{	k ++ ;
-			new_sample_rate = atoi (argv [k]) ;
+			new_sample_rate = parse_int_or_die (argv [k], "sample rate") ;
 			}
 		else if (strcmp (argv [k], "-by") == 0)
 		{	k ++ ;
@@ -79,7 +81,7 @@ main (int argc, char *argv [])
 			}
 		else if (strcmp (argv [k], "-c") == 0)
 		{	k ++ ;
-			converter = atoi (argv [k]) ;
+			converter = parse_int_or_die (argv [k], "converter") ;
 			}
 		else
 			usage_exit (argv [0]) ;
@@ -98,6 +100,7 @@ main (int argc, char *argv [])
 		exit (1) ;
 		} ;
 
+	memset (&sfinfo, 0, sizeof (sfinfo)) ;
 	if ((infile = sf_open (argv [argc - 2], SFM_READ, &sfinfo)) == NULL)
 	{	printf ("Error : Not able to open input file '%s'\n", argv [argc - 2]) ;
 		exit (1) ;

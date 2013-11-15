@@ -30,9 +30,13 @@ libtool
 ltmain.sh
 run-test.sh
 sndfile-tools-*.tar.gz
-src/*_test
+tests/*_test
+tests/*_tests
 src/config.h
 src/config.h.in
 src/fir_hilbert_coeffs.h
+src/sndfile-generate-chirp
+src/sndfile-jackplay
+src/sndfile-mix-to-mono
 src/sndfile-pitch-infer
 src/stamp-h1

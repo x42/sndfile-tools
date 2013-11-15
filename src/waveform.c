@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2007-2012 Erik de Castro Lopo <erikd@mega-nerd.com>
 ** Copyright (C) 2012 Robin Gareus <robin@gareus.org>
+** Copyright (C) 2013 driedfruit <driedfruit@mindloop.net>
 **
 ** This program is free software: you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -75,6 +76,7 @@ typedef struct
 	int tc_num, tc_den ;
 	double tc_off ;
 	bool parse_bwf ;
+	double border_width ;
 } RENDER ;
 
 enum WHAT { PEAK = 1, RMS = 2 } ;
@@ -146,16 +148,17 @@ calc_peak (SNDFILE *infile, SF_INFO *info, double width, int channel, AGC *agc)
 
 	const float frames_per_bin = info->frames / (float) width ;
 	const long max_frames_per_bin = ceilf (frames_per_bin) ;
-	float* data = malloc (sizeof (float) * max_frames_per_bin * info->channels) ;
+	float* data ;
 	long f_offset = 0 ;
 
-	if (!data)
-	{	printf ("out of memory.\n") ;
+	if (channel < 0 || channel >= info->channels)
+	{	printf ("invalid channel\n") ;
 		return ;
 		} ;
 
-	if (channel < 0 || channel > info->channels)
-	{	printf ("invalid channel\n") ;
+	data = malloc (sizeof (float) * max_frames_per_bin * info->channels) ;
+	if (!data)
+	{	printf ("out of memory.\n") ;
 		return ;
 		} ;
 
@@ -198,10 +201,10 @@ calc_peak (SNDFILE *infile, SF_INFO *info, double width, int channel, AGC *agc)
 		if (rms > s_rms) s_rms = rms ;
 
 		x++ ;
-		if (x > width ) break ;
+		if (x > width) break ;
 
 		f_offset += frames_per_buf ;
-		frames_per_buf = floorf ( (x+1) * frames_per_bin) - f_offset ;
+		frames_per_buf = floorf ((x + 1) * frames_per_bin) - f_offset ;
 		buffer_len = frames_per_buf * info->channels ;
 		} ;
 
@@ -214,6 +217,8 @@ calc_peak (SNDFILE *infile, SF_INFO *info, double width, int channel, AGC *agc)
 static void
 render_waveform (cairo_surface_t * surface, RENDER *render, SNDFILE *infile, SF_INFO *info, double left, double top, double width, double height, int channel, float gain)
 {
+	cairo_t * cr ;
+
 	float pmin = 0 ;
 	float pmax = 0 ;
 	float prms = 0 ;
@@ -223,25 +228,25 @@ render_waveform (cairo_surface_t * surface, RENDER *render, SNDFILE *infile, SF_
 	long frames_per_buf, buffer_len ;
 
 	const float frames_per_bin = info->frames / (float) width ;
-	const long max_frames_per_bin = ceilf (frames_per_bin) ;
-	float* data = malloc (sizeof (float) * max_frames_per_bin * info->channels) ;
+	const long max_frames_per_bin = 1 + ceilf (frames_per_bin) ;
+	float* data ;
 	long f_offset = 0 ;
 
+	if (channel < 0 || channel >= info->channels)
+	{	printf ("invalid channel\n") ;
+		return ;
+		} ;
+
+	data = malloc (sizeof (float) * max_frames_per_bin * info->channels) ;
 	if (!data)
 	{	printf ("out of memory.\n") ;
 		return ;
 		} ;
 
-	if (channel < 0 || channel > info->channels)
-	{	printf ("invalid channel\n") ;
-		return ;
-		} ;
-
 	sf_seek (infile, 0, SEEK_SET) ;
 
-	cairo_t * cr ;
 	cr = cairo_create (surface) ;
-
+	cairo_set_line_width (cr, render->border_width) ;
 	cairo_rectangle (cr, left, top, width, height) ;
 	cairo_stroke_preserve (cr) ;
 	cairo_set_source_rgba (cr, C_COLOUR (&render->c_bg)) ;
@@ -374,7 +379,8 @@ render_waveform (cairo_surface_t * surface, RENDER *render, SNDFILE *infile, SF_
 		if (x > width) break ;
 
 		f_offset += frames_per_buf ;
-		frames_per_buf = floorf ( (x+1) * frames_per_bin) - f_offset ;
+		frames_per_buf = floorf ((x + 1) * frames_per_bin) - f_offset ;
+		frames_per_buf = frames_per_buf > max_frames_per_bin ? max_frames_per_bin : frames_per_buf ;
 		buffer_len = frames_per_buf * info->channels ;
 		} ;
 
@@ -702,7 +708,7 @@ render_wav_border (cairo_surface_t * surface, const RENDER * render, double left
 	else
 	{	TICKS ticks ;
 		int k, tick_count ;
-		tick_count = calculate_ticks ( (render->rectified ? 1.0 : 2.0), height, &ticks) ;
+		tick_count = calculate_ticks ((render->rectified ? 1.0 : 2.0), height, &ticks) ;
 		for (k = 0 ; k < tick_count ; k++)
 		{	x_line (cr, left + width, top + height - ticks.distance [k], (k % 2) ? TICK_LEN : TXT_TICK_LEN) ;
 			if (k % 2 == 1)
@@ -749,12 +755,12 @@ render_y_legend (cairo_surface_t * surface, const RENDER * render, double top, d
 	if (render->what & RMS)
 	{	cairo_text_extents (cr, "RMS", &extents) ;
 		dh += dxy + extents.width ;
-		}
+		} ;
 	if (render->what & PEAK)
 	{	cairo_text_extents (cr, "Peak", &extents) ;
 		dh += dxy + extents.width ;
-		}
-	if ((render->what & (PEAK | RMS)) == (PEAK | RMS) ) { dh+= 8 ; }
+		} ;
+	if ((render->what & (PEAK | RMS)) == (PEAK | RMS)) { dh += 8 ; }
 
 	lx = cairo_image_surface_get_width (surface) - 12 - dxy ;
 	ly = top + (height + dh) / 2 ;
@@ -833,6 +839,7 @@ render_to_surface (RENDER * render, SNDFILE *infile, SF_INFO *info, cairo_surfac
 
 	/* wave-form background */
 	cairo_rectangle (cr, 0, 0, render->width, render->height) ;
+	cairo_set_line_width (cr, render->border_width) ;
 	cairo_stroke_preserve (cr) ;
 	cairo_set_source_rgba (cr, C_COLOUR (&render->c_bbg)) ;
 	cairo_fill (cr) ;
@@ -905,12 +912,11 @@ render_to_surface (RENDER * render, SNDFILE *infile, SF_INFO *info, cairo_surfac
 			render_timeaxis (surface, render, info, LEFT_BORDER, width, TOP_BORDER, height) ;
 		} ;
 
-
 	return ;
 } /* render_to_surface */
 
 static void
-render_cairo_surface (RENDER * render, SNDFILE *infile, SF_INFO *info )
+render_cairo_surface (RENDER * render, SNDFILE *infile, SF_INFO *info)
 {
 	cairo_surface_t * surface = NULL ;
 	cairo_status_t status ;
@@ -967,7 +973,7 @@ render_sndfile (RENDER * render)
 		} ;
 
 	if (render->geometry_no_border)	// given geometry applies to wave-form (per channel) without border.
-	{	if (render->channel <0 )
+	{	if (render->channel < 0)
 			render->height = render->height * info.channels + (info.channels-1) * render->channel_separation ;
 
 		if (render->border)
@@ -1042,7 +1048,7 @@ usage_exit (char * argv0, int status)
 		"                            < 0: render all channels vertically separated;\n"
 		"                            > 0: render only specified channel. (default: 0)\n"
 		"  -C, --centerline <COL>    set colour of zero/center line (default 0x4cffffff)\n"
-		"  -F, --foreground <COL>    specify background colour; default 0xff333333\n"
+		"  -F, --foreground <COL>    specify foreground colour; default 0xff333333\n"
 		"  -g <w>x<h>, --geometry <w>x<h>\n"
 		"                            specify the size of the image to create\n"
 		"                            default: 800x192\n"
@@ -1053,7 +1059,7 @@ usage_exit (char * argv0, int status)
 		"  --no-peak                 only draw RMS signal using foreground colour\n"
 		"  --no-rms                  only draw signal peaks (exclusive with --no-peak).\n"
 		"  -r, --rectified           rectify waveform\n"
-		"  -R, --rmscolour  <COL>    specify background colour; default 0xffb3b3b3\n"
+		"  -R, --rmscolour  <COL>    specify RMS colour; default 0xffb3b3b3\n"
 		"  -s, --gainscale           zoom into y-axis, map max signal to height.\n"
 		"  -S, --separator <px>      vertically separate channels by N pixels\n"
 		"                            (default: 12) - only used with -c -1\n"
@@ -1065,6 +1071,8 @@ usage_exit (char * argv0, int status)
 		"  -T <offset>               override the BWF time-reference (if any);\n"
 		"                            the offset is specified in audio-frames\n"
 		"                            and only used with timecode (-t) annotation.\n"
+		"  -O, --border-width        change outer border width\n"
+		"                            default: 1.0\n"
 		"  -V, --version             output version information and exit\n"
 		"  -W, --wavesize            given geometry applies to the plain wave-form.\n"
 		"                            image height depends on number of channels.\n"
@@ -1086,6 +1094,7 @@ static struct option const long_options [] =
 	{ "logscale", no_argument, 0, 'l' },
 	{ "rectified", no_argument, 0, 'r' },
 	{ "rectify", no_argument, 0, 'r' },
+	{ "border-width", required_argument, 0, 'O' },
 
 	{ "geometry", required_argument, 0, 'g' },
 	{ "separator", required_argument, 0, 'S' },
@@ -1128,7 +1137,8 @@ main (int argc, char * argv [])
 		/*border-bg*/	{ 0.0, 0.0, 0.0, 0.7 },
 		/*center-line*/	{ 1.0, 1.0, 1.0, 0.3 },
 		/*timecode num*/ 0, /*den*/ 0, /*offset*/ 0.0,
-		/*parse BWF*/ true
+		/*parse BWF*/ true,
+		/*border-width*/ 2.0f,
 		} ;
 
 	int c ;
@@ -1141,6 +1151,7 @@ main (int argc, char * argv [])
 				"F:"	/*	--foreground	*/
 				"G:"	/*	--borderbg	*/
 				"g:"	/*	--geometry	*/
+				"O:"	/*	--border-width	*/
 				"h"		/*	--help	*/
 				"l"		/*	--logscale	*/
 				"r"		/*	--rectified	*/
@@ -1165,7 +1176,7 @@ main (int argc, char * argv [])
 				render.border = true ;
 				break ;
 			case 'c' :		/* --channel */
-				render.channel = atoi (optarg) ;
+				render.channel = parse_int_or_die (optarg, "channel") ;
 				break ;
 			case 'C' :		/* --centerline */
 				set_colour (&render.c_cl, strtoll (optarg, NULL, 16)) ;
@@ -1203,7 +1214,7 @@ main (int argc, char * argv [])
 				render.autogain = true ;
 				break ;
 			case 'S' :		/* --separator */
-				render.channel_separation = atoi (optarg) ;
+				render.channel_separation = parse_int_or_die (optarg, "separator") ;
 				break ;
 			case 't' :		/* --timecode*/
 				{
@@ -1220,6 +1231,9 @@ main (int argc, char * argv [])
 			case 'T' :		/* --timeoffset */
 				render.parse_bwf = false ;
 				render.tc_off = strtod (optarg, NULL) ;
+				break ;
+			case 'O' :
+				render.border_width = strtod (optarg, NULL) * 2.0f ;
 				break ;
 			case 1 :
 				memcpy (&render.c_rms, &render.c_fg, sizeof (COLOUR)) ;
@@ -1243,13 +1257,13 @@ main (int argc, char * argv [])
 				usage_exit (argv [0], EXIT_FAILURE) ;
 			} ;
 
-	if (optind +2 > argc)
+	if (optind + 2 > argc)
 		usage_exit (argv [0], EXIT_FAILURE) ;
 
 	render.sndfilepath = argv [optind] ;
 	render.pngfilepath = argv [optind + 1] ;
 
-	if ((render.what& (RMS | PEAK)) == 0)
+	if ((render.what & (RMS | PEAK)) == 0)
 	{	printf ("Error: at least one of RMS or PEAK must be rendered\n") ;
 		exit (EXIT_FAILURE) ;
 		} ;

@@ -43,9 +43,6 @@
 #include "window.h"
 #include "common.h"
 
-#define	MIN_WIDTH	640
-#define	MIN_HEIGHT	480
-
 #define TICK_LEN			6
 #define	BORDER_LINE_WIDTH	1.8
 
@@ -114,12 +111,12 @@ get_colour_map_value (float value, double spec_floor_db, unsigned char colour [3
 		 * (v/s) * 254.0 is from 0.000001 to 253.9999999 and
 		 * we want 1 to 254, so ceil((v/s) * 254) gives us that,
 		 * converted to 254 to 1 by subtracting from 255. */
-		int c; /* The pixel value */
+		int c ; /* The pixel value */
 
 		if (value <= spec_floor_db)
-			c = 0;
+			c = 0 ;
 		else
-		{	c = 255 - lrintf (ceil ( (value / spec_floor_db) * 254.0 ) ) ;
+		{	c = 255 - lrintf (ceil ((value / spec_floor_db) * 254.0)) ;
 
 			if (c < 1 || c > 254)	/* Sanity check */
 			{	printf ("\nError : gray value is %d\n\n", c) ;
@@ -127,7 +124,7 @@ get_colour_map_value (float value, double spec_floor_db, unsigned char colour [3
 				} ;
 
 			} ;
-		colour [0] = colour [1] = colour [2] = c;
+		colour [0] = colour [1] = colour [2] = c ;
 		return ;
 		} ;
 
@@ -180,23 +177,20 @@ read_mono_audio (SNDFILE * file, sf_count_t filelen, double * data, int datalen,
 
 static void
 apply_window (double * data, int datalen)
-{
-	static double *window = NULL;
+{	static double *window = NULL ;
 	static int window_len = 0 ;
 	int k ;
 
 	if (window_len != datalen)
-	{
-		window = realloc( window, datalen * sizeof(double) );
+	{	window = realloc (window, datalen * sizeof (double)) ;
 		if (window == NULL)
-		{
-			printf ("%s : Not enough memory.\n", __func__) ;
+		{	printf ("%s : Not enough memory.\n", __func__) ;
 			exit (1) ;
-		} ;
+			} ;
 		window_len = datalen ;
 
 		calc_kaiser_window (window, datalen, 20.0) ;
-	} ;
+		} ;
 
 	for (k = 0 ; k < datalen ; k++)
 		data [k] *= window [k] ;
@@ -486,6 +480,41 @@ interp_spec (float * mag, int maglen, const double *spec, int speclen)
 	return ;
 } /* interp_spec */
 
+/* Pick the best FFT length good for FFTW?
+**
+** We use fftw_plan_r2r_1d() for which the documantation
+** http://fftw.org/fftw3_doc/Real_002dto_002dReal-Transforms.html says:
+**
+** "FFTW is generally best at handling sizes of the form
+** 2^a 3^b 5^c 7^d 11^e 13^f
+** where e+f is either 0 or 1, and the other exponents are arbitrary."
+*/
+
+/* Helper function: does N have only 2, 3, 5 and 7 as its factors? */
+static bool
+is_2357 (int n)
+{
+	/* Just eliminate all factors os 2, 3, 5 and 7 and see if 1 remains */
+	while (n % 2 == 0) n /= 2 ;
+	while (n % 3 == 0) n /= 3 ;
+	while (n % 5 == 0) n /= 5 ;
+	while (n % 7 == 0) n /= 7 ;
+	return (n == 1) ;
+}
+
+/* Helper function: is N a "fast" value for the FFT size? */
+static bool
+is_good_speclen (int n)
+{
+	/* It wants n, 11*n, 13*n but not (11*13*n)
+	** where n only has as factors 2, 3, 5 and 7
+	*/
+	if (n % (11 * 13) == 0) return 0 ; /* No good */
+
+	return is_2357 (n)	|| ((n % 11 == 0) && is_2357 (n / 11))
+						|| ((n % 13 == 0) && is_2357 (n / 13)) ;
+}
+
 static void
 render_to_surface (const RENDER * render, SNDFILE *infile, int samplerate, sf_count_t filelen, cairo_surface_t * surface)
 {
@@ -507,30 +536,59 @@ render_to_surface (const RENDER * render, SNDFILE *infile, int samplerate, sf_co
 		height = render->height ;
 		}
 
+	if (width < 1)
+	{	printf ("Error : 'width' parameter must be >= %d\n",
+			render->border ? (int) (LEFT_BORDER + RIGHT_BORDER) + 1 : 1) ;
+		exit (1) ;
+		} ;
+
+	if (height < 1)
+	{	printf ("Error : 'height' parameter must be >= %d\n",
+			render->border ? (int) (TOP_BORDER + BOTTOM_BORDER) + 1 : 1) ;
+		exit (1) ;
+		} ;
+
 	/*
-	**	Choose a speclen value that is long enough to represent frequencies down
-	**	to 20Hz, and then increase it slightly so it is a multiple of 0x40 so that
-	**	FFTW calculations will be quicker.
+	** Choose a speclen value that is long enough to represent frequencies
+	** down to 20Hz.
 	*/
 	speclen = height * (samplerate / 20 / height + 1) ;
-	speclen += 0x40 - (speclen & 0x3f) ;
 
-	time_domain     = calloc (2 * speclen, sizeof(double));
-	freq_domain     = calloc (2 * speclen, sizeof(double));
-	single_mag_spec = calloc (speclen, sizeof(double));
-	mag_spec        = calloc (width, sizeof(float *)); 
-	if ( time_domain == NULL || freq_domain == NULL ||
-	     single_mag_spec == NULL || mag_spec == NULL )
+	/* Find the nearest fast value for the FFT size. */
+	{	int d ;	/* difference */
+
+		for (d = 0 ; /* Will terminate */ ; d++)
+		{	/* Logarithmically, the integer above is closer than
+			** the integer below, so prefer it to the one below.
+			*/
+			if (is_good_speclen (speclen + d))
+			{	speclen += d ;
+				break ;
+				}
+			/* FFT length must also be >= the output height,
+			** otherwise repeated pixel rows occur in the output.
+			*/
+			if (speclen - d >= height && is_good_speclen (speclen - d))
+			{	speclen -= d ;
+				break ;
+				}
+			}
+		}
+
+	time_domain		= calloc (2 * speclen, sizeof (double)) ;
+	freq_domain		= calloc (2 * speclen, sizeof (double)) ;
+	single_mag_spec = calloc (speclen, sizeof (double)) ;
+	mag_spec		= calloc (width, sizeof (float *)) ;
+	if (time_domain == NULL || freq_domain == NULL || single_mag_spec == NULL || mag_spec == NULL)
 	{	printf ("%s : Not enough memory.\n", __func__) ;
 		exit (1) ;
 		} ;
 	for (w = 0 ; w < width ; w++)
-	{
-		if ( (mag_spec[w] = calloc(height, sizeof(float))) == NULL )
+	{	if ((mag_spec [w] = calloc (height, sizeof (float))) == NULL)
 		{	printf ("%s : Not enough memory.\n", __func__) ;
 			exit (1) ;
 			} ;
-		};
+		} ;
 
 	plan = fftw_plan_r2r_1d (2 * speclen, time_domain, freq_domain, FFTW_R2HC, FFTW_MEASURE | FFTW_PRESERVE_INPUT) ;
 	if (plan == NULL)
@@ -577,8 +635,8 @@ render_to_surface (const RENDER * render, SNDFILE *infile, int samplerate, sf_co
 		render_spectrogram (surface, render->spec_floor_db, mag_spec, max_mag, 0, 0, width, height, render->gray_scale) ;
 
 	for (w = 0 ; w < width ; w++)
-		free( mag_spec[w] );
-	free( mag_spec );
+		free (mag_spec [w]) ;
+	free (mag_spec) ;
 
 	return ;
 } /* render_to_surface */
@@ -639,15 +697,6 @@ render_sndfile (const RENDER * render)
 
 	return ;
 } /* render_sndfile */
-
-static void
-check_int_range (const char * name, int value, int lower, int upper)
-{
-	if (value < lower || value > upper)
-	{	printf ("Error : '%s' parameter must be in range [%d, %d]\n", name, lower, upper) ;
-		exit (1) ;
-		} ;
-} /* check_int_range */
 
 static void
 usage_exit (const char * argv0, int error)
@@ -716,13 +765,9 @@ main (int argc, char * argv [])
 		} ;
 
 	render.sndfilepath = argv [k] ;
-	render.width = atoi (argv [k + 1]) ;
-	render.height = atoi (argv [k + 2]) ;
+	render.width = parse_int_or_die (argv [k + 1], "width") ;
+	render.height = parse_int_or_die (argv [k + 2], "height") ;
 	render.pngfilepath = argv [k + 3] ;
-
-	check_int_range ("width", render.width, MIN_WIDTH, INT_MAX) ;
-	check_int_range ("height", render.height, MIN_HEIGHT, INT_MAX) ;
-
 
 	render.filename = strrchr (render.sndfilepath, '/') ;
 	render.filename = (render.filename != NULL) ? render.filename + 1 : render.sndfilepath ;
